@@ -120,6 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             record_payment($orderId, $payment_amount_cents, $payment_method, 'admin');
             log_action('pos_checkout', 'admin', 'order', $orderId, ['total_cents' => $total, 'payment_cents' => $payment_amount_cents], $posIp);
+            send_order_notification($orderId);
             $_SESSION['pos_cart'] = [];
             header('Location: pos.php?msg=' . rawurlencode('Sale completed. Order ID: ' . $orderId));
             exit;

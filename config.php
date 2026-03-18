@@ -191,10 +191,16 @@ function init_db(PDO $db): void
         discount_cents INTEGER NOT NULL DEFAULT 0,
         total_cents INTEGER NOT NULL DEFAULT 0,
         customer_name TEXT,
+        customer_email TEXT,
         customer_contact TEXT,
         created_at TEXT,
         completed_at TEXT
     )');
+    try {
+        $db->exec('ALTER TABLE orders ADD COLUMN customer_email TEXT');
+    } catch (PDOException $e) {
+        // ignore if exists
+    }
 
     // Items included in an order
     $db->exec('CREATE TABLE IF NOT EXISTS order_items (
@@ -381,6 +387,33 @@ function find_page_by_id(array $pages, string $id): ?array
         }
     }
     return null;
+}
+
+// ── CSRF token helpers ──
+
+function csrf_token(): string
+{
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+    if (empty($_SESSION['_csrf_token'])) {
+        $_SESSION['_csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['_csrf_token'];
+}
+
+function csrf_field(): string
+{
+    return '<input type="hidden" name="_csrf_token" value="' . htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') . '">';
+}
+
+function verify_csrf(): bool
+{
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+    $token = $_POST['_csrf_token'] ?? '';
+    return $token !== '' && isset($_SESSION['_csrf_token']) && hash_equals($_SESSION['_csrf_token'], $token);
 }
 
 // Find page by slug within an array of pages
@@ -1221,9 +1254,9 @@ function create_order(array $orderData, array $items, bool $subtractStock = true
         $total = $subtotal + $tax - $discount;
 
         $stmt = $db->prepare('INSERT INTO orders (
-            id, source, status, subtotal_cents, tax_cents, discount_cents, total_cents, customer_name, customer_contact, created_at
+            id, source, status, subtotal_cents, tax_cents, discount_cents, total_cents, customer_name, customer_email, customer_contact, created_at
         ) VALUES (
-            :id, :source, :status, :subtotal_cents, :tax_cents, :discount_cents, :total_cents, :customer_name, :customer_contact, :created_at
+            :id, :source, :status, :subtotal_cents, :tax_cents, :discount_cents, :total_cents, :customer_name, :customer_email, :customer_contact, :created_at
         )');
         $stmt->execute([
             ':id' => $orderId,
@@ -1234,6 +1267,7 @@ function create_order(array $orderData, array $items, bool $subtractStock = true
             ':discount_cents' => $discount,
             ':total_cents' => $total,
             ':customer_name' => $orderData['customer_name'] ?? null,
+            ':customer_email' => $orderData['customer_email'] ?? null,
             ':customer_contact' => $orderData['customer_contact'] ?? null,
             ':created_at' => $now,
         ]);
@@ -1307,6 +1341,187 @@ function record_payment(string $orderId, int $amountCents, string $method, ?stri
         $db->rollBack();
         throw $e;
     }
+}
+
+// ── Order management helpers ──
+
+define('ORDER_STATUSES', [
+    'pending'    => 'Pending',
+    'payment'    => 'Pending Payment',
+    'paid'       => 'Paid',
+    'delivered'  => 'Delivered',
+    'installed'  => 'Installed',
+    'completed'  => 'Completed',
+    'cancelled'  => 'Cancelled',
+]);
+
+function load_orders(array $filters = []): array
+{
+    $db = get_db();
+    $where = [];
+    $params = [];
+    if (!empty($filters['status'])) {
+        $where[] = 'o.status = :status';
+        $params[':status'] = $filters['status'];
+    }
+    if (!empty($filters['source'])) {
+        $where[] = 'o.source = :source';
+        $params[':source'] = $filters['source'];
+    }
+    if (!empty($filters['search'])) {
+        $where[] = '(o.id LIKE :search OR o.customer_name LIKE :search2 OR o.customer_contact LIKE :search3)';
+        $params[':search'] = '%' . $filters['search'] . '%';
+        $params[':search2'] = '%' . $filters['search'] . '%';
+        $params[':search3'] = '%' . $filters['search'] . '%';
+    }
+    $sql = 'SELECT o.*, (SELECT SUM(p.amount_cents) FROM payments p WHERE p.order_id = o.id) AS paid_cents FROM orders o';
+    if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
+    $sql .= ' ORDER BY o.created_at DESC';
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function find_order(string $id): ?array
+{
+    $db = get_db();
+    $stmt = $db->prepare('SELECT o.*, (SELECT SUM(p.amount_cents) FROM payments p WHERE p.order_id = o.id) AS paid_cents FROM orders o WHERE o.id = :id LIMIT 1');
+    $stmt->execute([':id' => $id]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+function load_order_items(string $orderId): array
+{
+    $db = get_db();
+    $stmt = $db->prepare('SELECT oi.*, pr.name AS product_name, pr.slug AS product_slug FROM order_items oi LEFT JOIN products pr ON pr.id = oi.product_id WHERE oi.order_id = :oid ORDER BY oi.id');
+    $stmt->execute([':oid' => $orderId]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function load_order_payments(string $orderId): array
+{
+    $db = get_db();
+    $stmt = $db->prepare('SELECT * FROM payments WHERE order_id = :oid ORDER BY received_at DESC');
+    $stmt->execute([':oid' => $orderId]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function update_order_status(string $orderId, string $status): void
+{
+    $db = get_db();
+    $now = date('c');
+    $completedAt = in_array($status, ['completed', 'cancelled']) ? $now : null;
+    $stmt = $db->prepare('UPDATE orders SET status = :status, completed_at = COALESCE(:completed_at, completed_at) WHERE id = :id');
+    $stmt->execute([':status' => $status, ':completed_at' => $completedAt, ':id' => $orderId]);
+
+    // Notify customer
+    send_customer_status_notification($orderId, $status);
+}
+
+// ── Notification helpers ──
+
+function get_notification_emails(): array
+{
+    $raw = get_setting('order_notification_emails', 'neilkoolAC@gmail.com');
+    return array_filter(array_map('trim', explode(',', $raw)), 'strlen');
+}
+
+function are_order_notifications_enabled(): bool
+{
+    return get_setting('order_notifications_enabled', '1') !== '0';
+}
+
+function send_order_notification(string $orderId): void
+{
+    if (!are_order_notifications_enabled()) return;
+    $emails = get_notification_emails();
+    if (empty($emails)) return;
+
+    $order = find_order($orderId);
+    if (!$order) return;
+    $items = load_order_items($orderId);
+
+    $currency = 'TTD';
+    $total = number_format(((int)$order['total_cents']) / 100, 2);
+    $source = $order['source'] === 'storefront' ? 'Website Shop' : 'POS';
+    $customerName = $order['customer_name'] ?: 'Not provided';
+    $customerContact = $order['customer_contact'] ?: 'Not provided';
+
+    $body = "New Order Received!\n";
+    $body .= "========================\n\n";
+    $body .= "Order ID: {$orderId}\n";
+    $body .= "Source: {$source}\n";
+    $body .= "Customer: {$customerName}\n";
+    $body .= "Contact: {$customerContact}\n";
+    $body .= "Date: " . date('Y-m-d H:i:s', strtotime($order['created_at'])) . "\n\n";
+    $body .= "Items:\n";
+    foreach ($items as $item) {
+        $itemTotal = number_format(((int)$item['total_cents']) / 100, 2);
+        $name = $item['product_name'] ?? $item['product_id'];
+        $body .= "  - {$name} x{$item['quantity']}  {$currency} {$itemTotal}\n";
+    }
+    $body .= "\nTotal: {$currency} {$total}\n";
+    $body .= "Status: " . (ORDER_STATUSES[$order['status']] ?? $order['status']) . "\n";
+    $body .= "\n---\nManage this order: orders.php?view={$orderId}\n";
+
+    $subject = "New Order #{$orderId} - {$currency} {$total}";
+    $headers = "From: noreply@neilkool.com\r\nContent-Type: text/plain; charset=UTF-8\r\n";
+
+    foreach ($emails as $email) {
+        @mail($email, $subject, $body, $headers);
+    }
+}
+
+function send_customer_status_notification(string $orderId, string $newStatus): void
+{
+    $order = find_order($orderId);
+    if (!$order) return;
+
+    $customerEmail = $order['customer_email'] ?? '';
+    if ($customerEmail === '' || !filter_var($customerEmail, FILTER_VALIDATE_EMAIL)) return;
+
+    $customerName = $order['customer_name'] ?: 'Valued Customer';
+    $statusLabel = ORDER_STATUSES[$newStatus] ?? $newStatus;
+    $currency = 'TTD';
+    $total = number_format(((int)$order['total_cents']) / 100, 2);
+    $items = load_order_items($orderId);
+
+    $statusMessages = [
+        'pending'   => 'We have received your order and are reviewing it.',
+        'payment'   => 'Your order is awaiting payment. Please complete your payment to proceed.',
+        'paid'      => 'Your payment has been confirmed. We are preparing your order.',
+        'delivered' => 'Your order has been delivered. Please confirm receipt.',
+        'installed' => 'Your AC unit has been installed. We hope you enjoy your new cooling system!',
+        'completed' => 'Your order is now complete. Thank you for choosing Neil Kool!',
+        'cancelled' => 'Your order has been cancelled. If you have questions, please contact us.',
+    ];
+    $statusMessage = $statusMessages[$newStatus] ?? 'Your order status has been updated.';
+
+    $body = "Hi {$customerName},\n\n";
+    $body .= "{$statusMessage}\n\n";
+    $body .= "Order Details\n";
+    $body .= "========================\n";
+    $body .= "Order ID: {$orderId}\n";
+    $body .= "Status: {$statusLabel}\n\n";
+    $body .= "Items:\n";
+    foreach ($items as $item) {
+        $itemTotal = number_format(((int)$item['total_cents']) / 100, 2);
+        $name = $item['product_name'] ?? $item['product_id'];
+        $body .= "  - {$name} x{$item['quantity']}  {$currency} {$itemTotal}\n";
+    }
+    $body .= "\nTotal: {$currency} {$total}\n";
+    $body .= "\n---\n";
+    $body .= "Neil Kool Air Conditioning Services\n";
+    $body .= "Phone: 868-748-4122 | 731-4164 | 282-7525\n";
+    $body .= "Email: neilkoolAC@gmail.com\n";
+
+    $subject = "Order Update: {$statusLabel} - Neil Kool #" . substr($orderId, 0, 12);
+    $headers = "From: Neil Kool <noreply@neilkool.com>\r\n";
+    $headers .= "Reply-To: neilkoolAC@gmail.com\r\n";
+    $headers .= "Content-Type: text/plain; charset=UTF-8\r\n";
+
+    @mail($customerEmail, $subject, $body, $headers);
 }
 
 // Write a generic audit log entry
@@ -1435,6 +1650,7 @@ function render_product_embed(array $product, ?string $returnUrl = null, array $
         . '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
             . ($showPrice ? '<span style="font-weight:700;color:#065f46;">' . htmlspecialchars($priceText, ENT_QUOTES, 'UTF-8') . '</span>' : '<span></span>')
             . '<form method="post" action="shop.php" style="display:flex;align-items:center;gap:8px;margin:0;">'
+                . csrf_field()
                 . '<input type="hidden" name="form_action" value="add_to_cart">'
                 . '<input type="hidden" name="product_id" value="' . $productId . '">'
                 . $returnField

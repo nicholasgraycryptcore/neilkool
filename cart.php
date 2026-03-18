@@ -17,6 +17,10 @@ function shop_money(int $cents, string $currency = 'USD'): string
 $ip = $_SERVER['REMOTE_ADDR'] ?? null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!verify_csrf()) {
+        header('Location: cart.php?err=' . rawurlencode('Invalid request. Please try again.'));
+        exit;
+    }
     $action = $_POST['form_action'] ?? '';
 
     if ($action === 'update_qty') {
@@ -147,6 +151,7 @@ $shopLogo = get_setting('site_logo_url', '');
         <h1 class="text-2xl font-bold text-gray-900">Shopping Cart</h1>
         <?php if (!empty($cart)): ?>
         <form method="post">
+            <?php echo csrf_field(); ?>
             <input type="hidden" name="form_action" value="clear_cart">
             <button type="submit" class="text-sm text-red-600 hover:text-red-700 font-medium transition-colors">Clear cart</button>
         </form>
@@ -170,6 +175,7 @@ $shopLogo = get_setting('site_logo_url', '');
 
                         <!-- Quantity -->
                         <form method="post" class="flex items-center gap-2">
+                            <?php echo csrf_field(); ?>
                             <input type="hidden" name="form_action" value="update_qty">
                             <input type="hidden" name="product_id" value="<?php echo htmlspecialchars($line['product_id'], ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="number" name="quantity" value="<?php echo (int)$line['quantity']; ?>" min="1"
@@ -184,6 +190,7 @@ $shopLogo = get_setting('site_logo_url', '');
 
                         <!-- Remove -->
                         <form method="post">
+                            <?php echo csrf_field(); ?>
                             <input type="hidden" name="form_action" value="remove_line">
                             <input type="hidden" name="product_id" value="<?php echo htmlspecialchars($line['product_id'], ENT_QUOTES, 'UTF-8'); ?>">
                             <button type="submit" class="p-2 text-gray-400 hover:text-red-500 transition-colors" title="Remove item">

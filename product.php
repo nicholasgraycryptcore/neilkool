@@ -235,6 +235,7 @@ $msg = $_GET['msg'] ?? '';
             <!-- Add to cart -->
             <?php if ((int)$product['stock'] > 0): ?>
                 <form method="post" action="shop.php" class="flex items-center gap-3 mb-8">
+                    <?php echo csrf_field(); ?>
                     <input type="hidden" name="form_action" value="add_to_cart">
                     <input type="hidden" name="product_id" value="<?php echo htmlspecialchars($product['id'], ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="return" value="<?php echo htmlspecialchars('product-' . $product['slug'] . '?msg=Added+to+cart', ENT_QUOTES, 'UTF-8'); ?>">

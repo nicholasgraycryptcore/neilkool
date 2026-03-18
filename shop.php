@@ -32,6 +32,10 @@ function shop_find_product(string $id): ?array
 $ip = $_SERVER['REMOTE_ADDR'] ?? null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!verify_csrf()) {
+        header('Location: shop.php?err=' . rawurlencode('Invalid request. Please try again.'));
+        exit;
+    }
     $action = $_POST['form_action'] ?? '';
 
     if ($action === 'add_to_cart') {
@@ -341,6 +345,7 @@ $menuItems = load_shop_menu_items();
 
                             <?php if ((int)$prod['stock'] > 0): ?>
                             <form method="post" class="flex items-center gap-2">
+                                <?php echo csrf_field(); ?>
                                 <input type="hidden" name="form_action" value="add_to_cart">
                                 <input type="hidden" name="product_id" value="<?php echo htmlspecialchars($prod['id'], ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="number" name="quantity" value="1" min="1" max="<?php echo (int)$prod['stock']; ?>"

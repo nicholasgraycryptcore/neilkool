@@ -1,5 +1,6 @@
 <?php
 require __DIR__ . '/config.php';
+if (session_status() === PHP_SESSION_NONE) { session_start(); }
 
 $pages = load_pages();
 $auto_snippets = load_auto_include_snippets();
@@ -430,5 +431,13 @@ if ($slug !== null) {
         <?php echo render_content_with_products($page['content']); ?>
     </div>
 </div>
+<script>
+(function(){
+    var slot = document.getElementById('csrf-slot');
+    if (slot) {
+        slot.innerHTML = '<input type="hidden" name="_csrf_token" value="<?php echo htmlspecialchars(csrf_token(), ENT_QUOTES, "UTF-8"); ?>">';
+    }
+})();
+</script>
 </body>
 </html>

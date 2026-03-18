@@ -19,6 +19,10 @@ $message = $_GET['msg'] ?? '';
 $error = $_GET['err'] ?? '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!verify_csrf()) {
+        header('Location: checkout.php?err=' . rawurlencode('Invalid request. Please try again.'));
+        exit;
+    }
     $action = $_POST['form_action'] ?? '';
 
     if ($action === 'checkout') {
@@ -29,6 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $customer_name = trim($_POST['customer_name'] ?? '');
+        $customer_email = trim($_POST['customer_email'] ?? '');
         $customer_contact = trim($_POST['customer_contact'] ?? '');
 
         $items = [];
@@ -48,10 +53,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'source' => 'storefront',
                 'status' => 'pending',
                 'customer_name' => $customer_name !== '' ? $customer_name : null,
+                'customer_email' => $customer_email !== '' ? $customer_email : null,
                 'customer_contact' => $customer_contact !== '' ? $customer_contact : null,
             ], $items, true);
 
-            log_action('storefront_checkout', $customer_contact ?: null, 'order', $orderId, ['total_cents' => $subtotal], $ip);
+            log_action('storefront_checkout', $customer_email ?: $customer_contact ?: null, 'order', $orderId, ['total_cents' => $subtotal], $ip);
+            send_order_notification($orderId);
             $_SESSION['shop_cart'] = [];
             header('Location: checkout.php?msg=' . rawurlencode('Order placed successfully! Your reference: ' . $orderId));
             exit;
@@ -181,6 +188,7 @@ $shopLogo = get_setting('site_logo_url', '');
                 <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
                     <h2 class="text-lg font-semibold text-gray-900 mb-6">Contact Information</h2>
                     <form method="post" id="checkout-form" class="space-y-5">
+                        <?php echo csrf_field(); ?>
                         <input type="hidden" name="form_action" value="checkout">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1.5">Full Name</label>
@@ -189,10 +197,16 @@ $shopLogo = get_setting('site_logo_url', '');
                                    placeholder="Enter your full name">
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1.5">Email or Phone</label>
-                            <input type="text" name="customer_contact" required
+                            <label class="block text-sm font-medium text-gray-700 mb-1.5">Email Address</label>
+                            <input type="email" name="customer_email" required
                                    class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                                   placeholder="Enter your email or phone number">
+                                   placeholder="your@email.com">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1.5">Phone Number</label>
+                            <input type="tel" name="customer_contact"
+                                   class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                                   placeholder="Optional phone number">
                         </div>
                         <button type="submit"
                                 class="w-full inline-flex justify-center items-center gap-2 px-6 py-3.5 rounded-xl bg-gray-900 hover:bg-gray-800 text-white text-sm font-semibold transition-all hover:shadow-lg mt-2">

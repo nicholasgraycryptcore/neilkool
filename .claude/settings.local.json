@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(where php:*)",
+      "Bash(sqlite3 /c/xampp/htdocs/neilkool/data/site.sqlite \"SELECT id, title, slug, template FROM pages;\")",
+      "Bash(sqlite3 /c/xampp/htdocs/neilkool/data/site.sqlite \"SELECT id, name, slug, price_cents, stock FROM products;\")",
+      "Bash(sqlite3 /c/xampp/htdocs/neilkool/data/site.sqlite \"SELECT name, value FROM settings;\")",
+      "Bash(sqlite3 /c/xampp/htdocs/neilkool/data/site.sqlite \".mode line\" \"SELECT id, title, slug, content FROM pages WHERE slug = ''home'';\")",
+      "Bash(sqlite3 /c/xampp/htdocs/neilkool/data/site.sqlite \".mode line\" \"SELECT id, title, slug, description, price_cents, stock, primary_image_url FROM products WHERE slug = ''daikin'';\")",
+      "Bash(sqlite3 /c/xampp/htdocs/neilkool/data/site.sqlite \".mode line\" \"SELECT id, name, slug, description, price_cents, stock, primary_image_url FROM products WHERE slug = ''daikin'';\")",
+      "Bash(sqlite3 /c/xampp/htdocs/neilkool/data/site.sqlite \"SELECT id, label, url FROM shop_menu_items;\")",
+      "Bash(sqlite3 /c/xampp/htdocs/neilkool/data/site.sqlite \"SELECT id, original_name, filename, size FROM media LIMIT 20;\")",
+      "Bash(c:/xampp/php/php.exe seed_content.php)",
+      "Bash(c:/xampp/php/php.exe -r \":*)",
+      "Bash(c:/xampp/php/php.exe update_homepage.php)",
+      "Bash(for f:*)",
+      "Bash(do)",
+      "Bash(echo \"=== $f ===\")",
+      "Read(//c/xampp/htdocs/neilkool/**)",
+      "Bash(done)",
+      "Bash(c:/xampp/php/php.exe update_carousels.php)",
+      "Bash(c=/xampp/php/php.exe -r \":*)",
+      "Bash(c:/xampp/php/php.exe fix_hero.php)",
+      "Bash(rm fix_hero.php)",
+      "Bash(xargs grep:*)"
+    ]
+  }
+}

@@ -4,6 +4,7 @@ function admin_nav_items(): array
     return [
         ['label' => 'Dashboard', 'url' => 'admin.php', 'key' => 'dashboard'],
         ['label' => 'Cashier', 'url' => 'pos.php', 'key' => 'pos'],
+        ['label' => 'Orders', 'url' => 'orders.php', 'key' => 'orders'],
         ['label' => 'Ecommerce', 'url' => 'ecommerce.php', 'key' => 'ecommerce'],
         ['label' => 'Suppliers', 'url' => 'suppliers.php', 'key' => 'suppliers'],
         ['label' => 'Purchase Orders', 'url' => 'purchase_orders.php', 'key' => 'purchase_orders'],
