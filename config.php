@@ -164,6 +164,11 @@ function init_db(PDO $db): void
     } catch (PDOException $e) {
         // ignore if exists
     }
+    try {
+        $db->exec('ALTER TABLE products ADD COLUMN show_price INTEGER NOT NULL DEFAULT 1');
+    } catch (PDOException $e) {
+        // ignore if exists
+    }
 
     // Inventory adjustments (manual or via orders)
     $db->exec('CREATE TABLE IF NOT EXISTS inventory_movements (
@@ -297,6 +302,17 @@ function init_db(PDO $db): void
         meta TEXT,
         created_at TEXT,
         ip_address TEXT
+    )');
+
+    // Shop navigation menu items
+    $db->exec('CREATE TABLE IF NOT EXISTS shop_menu_items (
+        id TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        url TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        open_new_tab INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT
     )');
 }
 
@@ -1023,10 +1039,10 @@ function save_product(array $data): string
 
     $stmt = $db->prepare('INSERT INTO products (
             id, name, slug, description, price_cents, currency, sku,
-            category_id, subcategory_id, stock, status, image_id, primary_image_url, gallery_images, created_at, updated_at
+            category_id, subcategory_id, stock, status, image_id, primary_image_url, gallery_images, show_price, created_at, updated_at
         ) VALUES (
             :id, :name, :slug, :description, :price_cents, :currency, :sku,
-            :category_id, :subcategory_id, :stock, :status, :image_id, :primary_image_url, :gallery_images, :created_at, :updated_at
+            :category_id, :subcategory_id, :stock, :status, :image_id, :primary_image_url, :gallery_images, :show_price, :created_at, :updated_at
         ) ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             slug = excluded.slug,
@@ -1041,6 +1057,7 @@ function save_product(array $data): string
             image_id = excluded.image_id,
             primary_image_url = excluded.primary_image_url,
             gallery_images = excluded.gallery_images,
+            show_price = excluded.show_price,
             updated_at = excluded.updated_at');
 
     $now = date('c');
@@ -1059,6 +1076,7 @@ function save_product(array $data): string
         ':image_id' => $data['image_id'] ?? null,
         ':primary_image_url' => $data['primary_image_url'] ?? null,
         ':gallery_images' => $galleryJson,
+        ':show_price' => (int)($data['show_price'] ?? 1),
         ':created_at' => $data['created_at'] ?? $now,
         ':updated_at' => $now,
     ]);
@@ -1082,7 +1100,7 @@ function load_products(array $filters = []): array
         $params[':category_id'] = $filters['category_id'];
     }
 
-    $query = 'SELECT id, name, slug, description, price_cents, currency, sku, category_id, subcategory_id, stock, status, image_id, primary_image_url, gallery_images, created_at, updated_at FROM products';
+    $query = 'SELECT id, name, slug, description, price_cents, currency, sku, category_id, subcategory_id, stock, status, image_id, primary_image_url, gallery_images, show_price, created_at, updated_at FROM products';
     if (!empty($where)) {
         $query .= ' WHERE ' . implode(' AND ', $where);
     }
@@ -1098,7 +1116,7 @@ function load_products(array $filters = []): array
 function find_product_by_slug(string $slug): ?array
 {
     $db = get_db();
-    $stmt = $db->prepare('SELECT id, name, slug, description, price_cents, currency, sku, category_id, subcategory_id, stock, status, image_id, primary_image_url, gallery_images, created_at, updated_at FROM products WHERE slug = :slug LIMIT 1');
+    $stmt = $db->prepare('SELECT id, name, slug, description, price_cents, currency, sku, category_id, subcategory_id, stock, status, image_id, primary_image_url, gallery_images, show_price, created_at, updated_at FROM products WHERE slug = :slug LIMIT 1');
     $stmt->execute([':slug' => $slug]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     return $row ?: null;
@@ -1108,7 +1126,7 @@ function find_product_by_slug(string $slug): ?array
 function find_product_by_id_global(string $id): ?array
 {
     $db = get_db();
-    $stmt = $db->prepare('SELECT id, name, slug, description, price_cents, currency, sku, category_id, subcategory_id, stock, status, image_id, primary_image_url, gallery_images, created_at, updated_at FROM products WHERE id = :id LIMIT 1');
+    $stmt = $db->prepare('SELECT id, name, slug, description, price_cents, currency, sku, category_id, subcategory_id, stock, status, image_id, primary_image_url, gallery_images, show_price, created_at, updated_at FROM products WHERE id = :id LIMIT 1');
     $stmt->execute([':id' => $id]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     return $row ?: null;
@@ -1471,4 +1489,44 @@ function render_content_with_products(string $html): string
         }
         return render_product_embed($product, $returnUrl, $options, $categoryLookup);
     }, $html);
+}
+
+// --- Shop menu helpers ---
+
+function load_shop_menu_items(): array
+{
+    $db = get_db();
+    $stmt = $db->query('SELECT id, label, url, sort_order, open_new_tab, created_at, updated_at FROM shop_menu_items ORDER BY sort_order ASC, label COLLATE NOCASE');
+    $rows = $stmt->fetchAll();
+    return is_array($rows) ? $rows : [];
+}
+
+function save_shop_menu_item(array $data): void
+{
+    $db = get_db();
+    $now = date('c');
+    $stmt = $db->prepare('INSERT INTO shop_menu_items (id, label, url, sort_order, open_new_tab, created_at, updated_at)
+                          VALUES (:id, :label, :url, :sort_order, :open_new_tab, :created_at, :updated_at)
+                          ON CONFLICT(id) DO UPDATE SET
+                            label = excluded.label,
+                            url = excluded.url,
+                            sort_order = excluded.sort_order,
+                            open_new_tab = excluded.open_new_tab,
+                            updated_at = excluded.updated_at');
+    $stmt->execute([
+        ':id' => $data['id'] ?? generate_entity_id('smenu_'),
+        ':label' => $data['label'],
+        ':url' => $data['url'],
+        ':sort_order' => (int)($data['sort_order'] ?? 0),
+        ':open_new_tab' => !empty($data['open_new_tab']) ? 1 : 0,
+        ':created_at' => $data['created_at'] ?? $now,
+        ':updated_at' => $now,
+    ]);
+}
+
+function delete_shop_menu_item(string $id): void
+{
+    $db = get_db();
+    $stmt = $db->prepare('DELETE FROM shop_menu_items WHERE id = :id');
+    $stmt->execute([':id' => $id]);
 }

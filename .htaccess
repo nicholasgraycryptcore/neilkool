@@ -1,0 +1,5 @@
+RewriteEngine On
+RewriteBase /neilkool/
+
+# Product clean URLs: /product-{slug} -> product.php?slug={slug}
+RewriteRule ^product-([a-zA-Z0-9_-]+)$ product.php?slug=$1 [L,QSA]

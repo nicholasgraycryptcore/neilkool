@@ -72,6 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'image_id' => trim($_POST['image_id'] ?? '') ?: null,
                 'primary_image_url' => trim($_POST['primary_image_url'] ?? '') ?: null,
                 'gallery_images' => trim($_POST['gallery_images'] ?? ''),
+                'show_price' => isset($_POST['show_price']) ? 1 : 0,
             ]);
             ensure_product_page($productId);
             log_action('save_product', 'admin', 'product', $productId, ['name' => $name, 'price_cents' => $price_cents]);
@@ -79,6 +80,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         } catch (Throwable $e) {
             header('Location: ecommerce.php?err=' . rawurlencode('Could not save product: ' . $e->getMessage()));
+            exit;
+        }
+    } elseif ($action === 'save_menu_item') {
+        $label = trim($_POST['menu_label'] ?? '');
+        $url = trim($_POST['menu_url'] ?? '');
+        $sort_order = (int)($_POST['menu_sort_order'] ?? 0);
+        $open_new_tab = isset($_POST['menu_open_new_tab']) ? 1 : 0;
+
+        if ($label === '' || $url === '') {
+            header('Location: ecommerce.php?err=' . rawurlencode('Menu item label and URL are required.'));
+            exit;
+        }
+
+        try {
+            save_shop_menu_item([
+                'id' => $_POST['menu_id'] ?? null,
+                'label' => $label,
+                'url' => $url,
+                'sort_order' => $sort_order,
+                'open_new_tab' => $open_new_tab,
+            ]);
+            log_action('save_shop_menu_item', 'admin', 'shop_menu', $_POST['menu_id'] ?? null, ['label' => $label]);
+            header('Location: ecommerce.php?msg=' . rawurlencode('Menu item saved.'));
+            exit;
+        } catch (Throwable $e) {
+            header('Location: ecommerce.php?err=' . rawurlencode('Could not save menu item: ' . $e->getMessage()));
+            exit;
+        }
+    } elseif ($action === 'delete_menu_item') {
+        $menu_id = trim($_POST['menu_id'] ?? '');
+        if ($menu_id === '') {
+            header('Location: ecommerce.php?err=' . rawurlencode('No menu item specified.'));
+            exit;
+        }
+        try {
+            delete_shop_menu_item($menu_id);
+            log_action('delete_shop_menu_item', 'admin', 'shop_menu', $menu_id);
+            header('Location: ecommerce.php?msg=' . rawurlencode('Menu item removed.'));
+            exit;
+        } catch (Throwable $e) {
+            header('Location: ecommerce.php?err=' . rawurlencode('Could not delete menu item: ' . $e->getMessage()));
             exit;
         }
     } elseif ($action === 'adjust_stock') {
@@ -121,6 +163,7 @@ foreach ($categories as $cat) {
     $category_lookup[$cat['id']] = $cat['name'];
 }
 $media_items = load_media();
+$shop_menu_items = load_shop_menu_items();
 
 ?>
 <!DOCTYPE html>
@@ -203,35 +246,36 @@ $media_items = load_media();
                 <a href="ecommerce.php" class="text-sm text-blue-600">Clear</a>
             <?php endif; ?>
         </form>
-        <form method="post" class="grid md:grid-cols-3 gap-3">
+        <form method="post" id="product-form" class="grid md:grid-cols-3 gap-3">
             <input type="hidden" name="form_action" value="save_product">
+            <input type="hidden" name="id" id="product_id" value="">
             <div>
                 <label class="block text-sm font-medium text-slate-700 mb-1">Name</label>
-                <input type="text" name="name" class="w-full border rounded px-3 py-2 text-sm" placeholder="Product name" required>
+                <input type="text" name="name" id="product_name" class="w-full border rounded px-3 py-2 text-sm" placeholder="Product name" required>
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-700 mb-1">SKU</label>
-                <input type="text" name="sku" class="w-full border rounded px-3 py-2 text-sm" placeholder="Optional SKU">
+                <input type="text" name="sku" id="product_sku" class="w-full border rounded px-3 py-2 text-sm" placeholder="Optional SKU">
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-700 mb-1">Slug</label>
-                <input type="text" name="slug" class="w-full border rounded px-3 py-2 text-sm" placeholder="Optional URL slug">
+                <input type="text" name="slug" id="product_slug" class="w-full border rounded px-3 py-2 text-sm" placeholder="Optional URL slug">
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-700 mb-1">Price</label>
-                <input type="number" step="0.01" min="0" name="price" class="w-full border rounded px-3 py-2 text-sm" placeholder="0.00" required>
+                <input type="number" step="0.01" min="0" name="price" id="product_price" class="w-full border rounded px-3 py-2 text-sm" placeholder="0.00" required>
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-700 mb-1">Currency</label>
-                <input type="text" name="currency" value="USD" class="w-full border rounded px-3 py-2 text-sm" maxlength="3">
+                <input type="text" name="currency" id="product_currency" value="USD" class="w-full border rounded px-3 py-2 text-sm" maxlength="3">
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-700 mb-1">Initial stock</label>
-                <input type="number" name="stock" class="w-full border rounded px-3 py-2 text-sm" value="0">
+                <input type="number" name="stock" id="product_stock" class="w-full border rounded px-3 py-2 text-sm" value="0">
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-700 mb-1">Category</label>
-                <select name="category_id" class="w-full border rounded px-3 py-2 text-sm">
+                <select name="category_id" id="product_category_id" class="w-full border rounded px-3 py-2 text-sm">
                     <option value="">None</option>
                     <?php foreach ($categories as $cat): ?>
                         <option value="<?php echo htmlspecialchars($cat['id'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($cat['name'], ENT_QUOTES, 'UTF-8'); ?></option>
@@ -240,7 +284,7 @@ $media_items = load_media();
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-700 mb-1">Subcategory</label>
-                <select name="subcategory_id" class="w-full border rounded px-3 py-2 text-sm">
+                <select name="subcategory_id" id="product_subcategory_id" class="w-full border rounded px-3 py-2 text-sm">
                     <option value="">None</option>
                     <?php foreach ($categories as $cat): ?>
                         <option value="<?php echo htmlspecialchars($cat['id'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($cat['name'], ENT_QUOTES, 'UTF-8'); ?></option>
@@ -249,10 +293,16 @@ $media_items = load_media();
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-700 mb-1">Status</label>
-                <select name="status" class="w-full border rounded px-3 py-2 text-sm">
+                <select name="status" id="product_status" class="w-full border rounded px-3 py-2 text-sm">
                     <option value="active">Active</option>
                     <option value="inactive">Inactive</option>
                 </select>
+            </div>
+            <div class="flex items-end pb-1">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" name="show_price" value="1" id="product_show_price" checked class="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+                    <span class="text-sm font-medium text-slate-700">Show price on store</span>
+                </label>
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-700 mb-1">Primary image URL</label>
@@ -295,10 +345,11 @@ $media_items = load_media();
             </div>
             <div class="md:col-span-3">
                 <label class="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                <textarea name="description" rows="3" class="w-full border rounded px-3 py-2 text-sm" placeholder="Short description"></textarea>
+                <textarea name="description" id="product_description" rows="3" class="w-full border rounded px-3 py-2 text-sm" placeholder="Short description"></textarea>
             </div>
-            <div class="md:col-span-3 flex justify-end">
-                <button type="submit" class="inline-flex items-center px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm">Save product</button>
+            <div class="md:col-span-3 flex justify-end gap-2">
+                <button type="button" id="cancel-edit-btn" onclick="cancelProductEdit()" class="hidden inline-flex items-center px-4 py-2 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm">Cancel edit</button>
+                <button type="submit" id="save-product-btn" class="inline-flex items-center px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm">Save product</button>
             </div>
         </form>
 
@@ -349,8 +400,9 @@ $media_items = load_media();
                                 </span>
                             </td>
                             <td class="py-2 pr-4 text-slate-600"><?php echo htmlspecialchars(substr((string)$prod['updated_at'], 0, 19), ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td class="py-2">
-                                <a href="product.php?slug=<?php echo htmlspecialchars($prod['slug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-xs text-blue-600 hover:underline">View page</a>
+                            <td class="py-2 whitespace-nowrap">
+                                <button type="button" onclick='editProduct(<?php echo htmlspecialchars(json_encode($prod), ENT_QUOTES, "UTF-8"); ?>)' class="text-xs text-amber-600 hover:underline mr-2">Edit</button>
+                                <a href="product-<?php echo htmlspecialchars($prod['slug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-xs text-blue-600 hover:underline">View</a>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -402,6 +454,75 @@ $media_items = load_media();
                 <button type="submit" class="inline-flex items-center px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm">Adjust stock</button>
             </div>
         </form>
+    </section>
+
+    <!-- Shop Menu Management -->
+    <section class="bg-white rounded shadow-sm border border-slate-200 p-4">
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold text-slate-800">Shop Navigation Menu</h2>
+        </div>
+        <p class="text-sm text-slate-500 mb-3">Add links that appear in the shop page header navigation.</p>
+        <form method="post" id="menu-item-form" class="grid md:grid-cols-5 gap-3">
+            <input type="hidden" name="form_action" value="save_menu_item">
+            <input type="hidden" name="menu_id" id="menu_item_id" value="">
+            <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-slate-700 mb-1">Label</label>
+                <input type="text" name="menu_label" id="menu_item_label" class="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. Home, About, Contact" required>
+            </div>
+            <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-slate-700 mb-1">URL</label>
+                <input type="text" name="menu_url" id="menu_item_url" class="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. /about or https://example.com" required>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-700 mb-1">Sort order</label>
+                <input type="number" name="menu_sort_order" id="menu_item_sort" class="w-full border rounded px-3 py-2 text-sm" value="0">
+            </div>
+            <div class="flex items-end gap-3 md:col-span-5">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" name="menu_open_new_tab" value="1" id="menu_item_new_tab" class="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+                    <span class="text-sm font-medium text-slate-700">Open in new tab</span>
+                </label>
+                <div class="ml-auto flex gap-2">
+                    <button type="button" id="cancel-menu-edit-btn" onclick="cancelMenuEdit()" class="hidden inline-flex items-center px-4 py-2 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm">Cancel</button>
+                    <button type="submit" id="save-menu-btn" class="inline-flex items-center px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm">Add menu item</button>
+                </div>
+            </div>
+        </form>
+        <?php if (!empty($shop_menu_items)): ?>
+            <div class="mt-4 overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead>
+                    <tr class="text-left text-slate-600 border-b">
+                        <th class="py-2 pr-4">Order</th>
+                        <th class="py-2 pr-4">Label</th>
+                        <th class="py-2 pr-4">URL</th>
+                        <th class="py-2 pr-4">New tab</th>
+                        <th class="py-2">Actions</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($shop_menu_items as $mi): ?>
+                        <tr class="border-b last:border-0">
+                            <td class="py-2 pr-4 text-slate-600"><?php echo (int)$mi['sort_order']; ?></td>
+                            <td class="py-2 pr-4 font-medium text-slate-800"><?php echo htmlspecialchars($mi['label'], ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td class="py-2 pr-4 text-slate-600 truncate max-w-xs"><?php echo htmlspecialchars($mi['url'], ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td class="py-2 pr-4 text-slate-600"><?php echo (int)$mi['open_new_tab'] ? 'Yes' : 'No'; ?></td>
+                            <td class="py-2 whitespace-nowrap">
+                                <button type="button" onclick='editMenuItem(<?php echo htmlspecialchars(json_encode($mi), ENT_QUOTES, "UTF-8"); ?>)' class="text-xs text-amber-600 hover:underline mr-2">Edit</button>
+                                <form method="post" class="inline" onsubmit="return confirm('Remove this menu item?');">
+                                    <input type="hidden" name="form_action" value="delete_menu_item">
+                                    <input type="hidden" name="menu_id" value="<?php echo htmlspecialchars($mi['id'], ENT_QUOTES, 'UTF-8'); ?>">
+                                    <button type="submit" class="text-xs text-rose-600 hover:underline">Remove</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php else: ?>
+            <p class="mt-2 text-sm text-slate-600">No menu items yet. The shop header will show only the logo and search.</p>
+        <?php endif; ?>
     </section>
 </main>
 </body>
@@ -503,6 +624,74 @@ $media_items = load_media();
             renderGallery();
         }
     })();
+</script>
+<script>
+function editProduct(prod) {
+    document.getElementById('product_id').value = prod.id || '';
+    document.getElementById('product_name').value = prod.name || '';
+    document.getElementById('product_sku').value = prod.sku || '';
+    document.getElementById('product_slug').value = prod.slug || '';
+    document.getElementById('product_price').value = prod.price_cents ? (parseInt(prod.price_cents) / 100).toFixed(2) : '0.00';
+    document.getElementById('product_currency').value = prod.currency || 'USD';
+    document.getElementById('product_stock').value = prod.stock || 0;
+    document.getElementById('product_category_id').value = prod.category_id || '';
+    document.getElementById('product_subcategory_id').value = prod.subcategory_id || '';
+    document.getElementById('product_status').value = prod.status || 'active';
+    document.getElementById('product_show_price').checked = prod.show_price != 0;
+    document.getElementById('primary_image_url').value = prod.primary_image_url || '';
+    document.getElementById('product_description').value = prod.description || '';
+
+    // Gallery images
+    var gallery = prod.gallery_images || '';
+    try {
+        var parsed = JSON.parse(gallery);
+        if (Array.isArray(parsed)) gallery = parsed.join(', ');
+    } catch(e) {}
+    document.getElementById('gallery_images').value = gallery;
+
+    // Trigger previews
+    document.getElementById('primary_image_url').dispatchEvent(new Event('input'));
+    document.getElementById('gallery_images').dispatchEvent(new Event('input'));
+
+    // Update UI
+    document.getElementById('save-product-btn').textContent = 'Update product';
+    document.getElementById('cancel-edit-btn').classList.remove('hidden');
+
+    // Scroll to form
+    document.getElementById('product-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelProductEdit() {
+    document.getElementById('product-form').reset();
+    document.getElementById('product_id').value = '';
+    document.getElementById('product_currency').value = 'USD';
+    document.getElementById('product_show_price').checked = true;
+    document.getElementById('save-product-btn').textContent = 'Save product';
+    document.getElementById('cancel-edit-btn').classList.add('hidden');
+
+    // Clear previews
+    document.getElementById('primary_image_url').dispatchEvent(new Event('input'));
+    document.getElementById('gallery_images').dispatchEvent(new Event('input'));
+}
+
+function editMenuItem(item) {
+    document.getElementById('menu_item_id').value = item.id || '';
+    document.getElementById('menu_item_label').value = item.label || '';
+    document.getElementById('menu_item_url').value = item.url || '';
+    document.getElementById('menu_item_sort').value = item.sort_order || 0;
+    document.getElementById('menu_item_new_tab').checked = item.open_new_tab == 1;
+    document.getElementById('save-menu-btn').textContent = 'Update menu item';
+    document.getElementById('cancel-menu-edit-btn').classList.remove('hidden');
+    document.getElementById('menu-item-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelMenuEdit() {
+    document.getElementById('menu-item-form').reset();
+    document.getElementById('menu_item_id').value = '';
+    document.getElementById('menu_item_sort').value = '0';
+    document.getElementById('save-menu-btn').textContent = 'Add menu item';
+    document.getElementById('cancel-menu-edit-btn').classList.add('hidden');
+}
 </script>
 <?php render_admin_sidebar_close(); ?>
 </html>

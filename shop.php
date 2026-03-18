@@ -28,7 +28,7 @@ function shop_find_product(string $id): ?array
     return $row ?: null;
 }
 
-// Handle cart actions and checkout
+// Handle add-to-cart
 $ip = $_SERVER['REMOTE_ADDR'] ?? null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -75,81 +75,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         log_action('cart_add', null, 'product', $product_id, ['qty' => $qty], $ip);
-        // Allow redirect back to the originating page if a relative path is provided
         if ($return !== '' && strpos($return, '://') === false) {
             header('Location: ' . $return);
         } else {
             header('Location: shop.php?msg=' . rawurlencode('Added to cart.'));
         }
         exit;
-    } elseif ($action === 'update_qty') {
-        $product_id = trim($_POST['product_id'] ?? '');
-        $qty = (int)($_POST['quantity'] ?? 0);
-        if ($product_id !== '' && $qty > 0) {
-            foreach ($_SESSION['shop_cart'] as &$line) {
-                if ($line['product_id'] === $product_id) {
-                    $line['quantity'] = $qty;
-                    log_action('cart_update', null, 'product', $product_id, ['qty' => $qty], $ip);
-                    break;
-                }
-            }
-            unset($line);
-        }
-        header('Location: shop.php');
-        exit;
-    } elseif ($action === 'remove_line') {
-        $product_id = trim($_POST['product_id'] ?? '');
-        $_SESSION['shop_cart'] = array_values(array_filter($_SESSION['shop_cart'], function ($line) use ($product_id) {
-            return $line['product_id'] !== $product_id;
-        }));
-        if ($product_id !== '') {
-            log_action('cart_remove', null, 'product', $product_id, [], $ip);
-        }
-        header('Location: shop.php');
-        exit;
-    } elseif ($action === 'clear_cart') {
-        $_SESSION['shop_cart'] = [];
-        log_action('cart_clear', null, null, null, [], $ip);
-        header('Location: shop.php?msg=' . rawurlencode('Cart cleared.'));
-        exit;
-    } elseif ($action === 'checkout') {
-        $cart = $_SESSION['shop_cart'];
-        if (empty($cart)) {
-            header('Location: shop.php?err=' . rawurlencode('Cart is empty.'));
-            exit;
-        }
-
-        $customer_name = trim($_POST['customer_name'] ?? '');
-        $customer_contact = trim($_POST['customer_contact'] ?? '');
-
-        $items = [];
-        $subtotal = 0;
-        foreach ($cart as $line) {
-            $lineTotal = ((int)$line['price_cents']) * ((int)$line['quantity']);
-            $subtotal += $lineTotal;
-            $items[] = [
-                'product_id' => $line['product_id'],
-                'quantity' => (int)$line['quantity'],
-                'unit_price_cents' => (int)$line['price_cents'],
-            ];
-        }
-
-        try {
-            $orderId = create_order([
-                'source' => 'storefront',
-                'status' => 'pending',
-                'customer_name' => $customer_name !== '' ? $customer_name : null,
-                'customer_contact' => $customer_contact !== '' ? $customer_contact : null,
-            ], $items, true);
-
-            log_action('storefront_checkout', $customer_contact ?: null, 'order', $orderId, ['total_cents' => $subtotal], $ip);
-            $_SESSION['shop_cart'] = [];
-            header('Location: shop.php?msg=' . rawurlencode('Order placed! Reference: ' . $orderId));
-            exit;
-        } catch (Throwable $e) {
-            header('Location: shop.php?err=' . rawurlencode('Checkout failed: ' . $e->getMessage()));
-            exit;
-        }
     }
 }
 
@@ -160,161 +91,314 @@ foreach ($categories as $cat) {
 }
 
 $selectedCategory = $_GET['category'] ?? null;
+$searchQuery = trim($_GET['q'] ?? '');
 $productFilters = ['status' => 'active'];
 if ($selectedCategory) {
     $productFilters['category_id'] = $selectedCategory;
 }
 $products = load_products($productFilters);
-$cart = $_SESSION['shop_cart'];
 
-$cartSubtotal = 0;
-foreach ($cart as $line) {
-    $cartSubtotal += ((int)$line['price_cents']) * ((int)$line['quantity']);
+// Filter by search
+if ($searchQuery !== '') {
+    $products = array_values(array_filter($products, function ($p) use ($searchQuery) {
+        return stripos($p['name'], $searchQuery) !== false || stripos($p['description'] ?? '', $searchQuery) !== false;
+    }));
 }
 
+$cart = $_SESSION['shop_cart'];
+$cartCount = 0;
+foreach ($cart as $line) {
+    $cartCount += (int)$line['quantity'];
+}
+
+$shopName = get_setting('site_name', 'Shop');
+$shopLogo = get_setting('site_logo_url', '');
+$menuItems = load_shop_menu_items();
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Shop</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?php echo htmlspecialchars($shopName, ENT_QUOTES, 'UTF-8'); ?></title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        .product-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        .product-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
+        .product-img { transition: transform 0.3s ease; }
+        .product-card:hover .product-img { transform: scale(1.05); }
+        .btn-cart { transition: all 0.2s ease; }
+        .btn-cart:hover { transform: scale(1.05); }
+        .btn-cart:active { transform: scale(0.95); }
+        .toast { animation: slideIn 0.3s ease, fadeOut 0.3s ease 2.7s forwards; }
+        @keyframes slideIn { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+        .badge-bounce { animation: bounce 0.3s ease; }
+        @keyframes bounce { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.3); } }
+        .category-pill.active { background-color: #1e293b; color: #fff; }
+    </style>
 </head>
-<body class="bg-slate-50 min-h-screen">
-<header class="bg-slate-900 text-white">
-    <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-        <h1 class="text-xl font-semibold">Shop</h1>
-        <a href="shop.php" class="text-sm underline">Home</a>
+<body class="bg-gray-50 min-h-screen font-sans flex flex-col">
+
+<!-- Header -->
+<header class="bg-white border-b border-gray-200 sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between h-16">
+            <a href="shop.php" class="flex items-center gap-2">
+                    <?php if ($shopLogo !== ''): ?>
+                        <img src="<?php echo htmlspecialchars($shopLogo, ENT_QUOTES, 'UTF-8'); ?>" alt="<?php echo htmlspecialchars($shopName, ENT_QUOTES, 'UTF-8'); ?>" class="h-8 w-auto">
+                    <?php endif; ?>
+                    <span class="text-xl font-bold text-gray-900 tracking-tight"><?php echo htmlspecialchars($shopName, ENT_QUOTES, 'UTF-8'); ?></span>
+                </a>
+
+            <!-- Navigation menu -->
+            <?php if (!empty($menuItems)): ?>
+            <nav class="hidden md:flex items-center gap-1">
+                <?php foreach ($menuItems as $mi): ?>
+                    <a href="<?php echo htmlspecialchars($mi['url'], ENT_QUOTES, 'UTF-8'); ?>"
+                       <?php echo (int)$mi['open_new_tab'] ? 'target="_blank" rel="noopener noreferrer"' : ''; ?>
+                       class="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 rounded-lg hover:bg-gray-100 transition-colors">
+                        <?php echo htmlspecialchars($mi['label'], ENT_QUOTES, 'UTF-8'); ?>
+                    </a>
+                <?php endforeach; ?>
+            </nav>
+            <?php endif; ?>
+
+            <div class="flex items-center gap-4">
+                <!-- Mobile menu toggle -->
+                <?php if (!empty($menuItems)): ?>
+                <button id="mobile-menu-btn" type="button" class="md:hidden p-2 text-gray-700 hover:text-gray-900 transition-colors" aria-label="Toggle menu">
+                    <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                    </svg>
+                </button>
+                <?php endif; ?>
+
+                <!-- Cart Icon -->
+                <a href="cart.php" class="relative p-2 text-gray-700 hover:text-gray-900 transition-colors" title="View cart">
+                    <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z"/>
+                    </svg>
+                    <?php if ($cartCount > 0): ?>
+                        <span id="cart-badge" class="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center badge-bounce">
+                            <?php echo $cartCount; ?>
+                        </span>
+                    <?php endif; ?>
+                </a>
+            </div>
+        </div>
     </div>
 </header>
 
-<main class="max-w-6xl mx-auto px-4 py-6 space-y-6">
+<!-- Mobile search -->
+<div class="sm:hidden bg-white border-b border-gray-200 px-4 py-3">
+    <form method="get" class="flex items-center">
+        <?php if ($selectedCategory): ?>
+            <input type="hidden" name="category" value="<?php echo htmlspecialchars($selectedCategory, ENT_QUOTES, 'UTF-8'); ?>">
+        <?php endif; ?>
+        <div class="relative w-full">
+            <input type="text" name="q" value="<?php echo htmlspecialchars($searchQuery, ENT_QUOTES, 'UTF-8'); ?>"
+                   placeholder="Search products..."
+                   class="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent bg-gray-50">
+            <svg class="absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+        </div>
+    </form>
+</div>
+
+<!-- Mobile navigation menu -->
+<?php if (!empty($menuItems)): ?>
+<div id="mobile-menu" class="md:hidden bg-white border-b border-gray-200 hidden">
+    <nav class="px-4 py-2 space-y-1">
+        <?php foreach ($menuItems as $mi): ?>
+            <a href="<?php echo htmlspecialchars($mi['url'], ENT_QUOTES, 'UTF-8'); ?>"
+               <?php echo (int)$mi['open_new_tab'] ? 'target="_blank" rel="noopener noreferrer"' : ''; ?>
+               class="block px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 rounded-lg hover:bg-gray-100 transition-colors">
+                <?php echo htmlspecialchars($mi['label'], ENT_QUOTES, 'UTF-8'); ?>
+            </a>
+        <?php endforeach; ?>
+    </nav>
+</div>
+<?php endif; ?>
+
+<!-- Flash messages -->
+<?php if ($message !== '' || $error !== ''): ?>
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
     <?php if ($message !== ''): ?>
-        <div class="rounded bg-emerald-100 text-emerald-800 px-4 py-2 text-sm"><?php echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8'); ?></div>
+        <div class="toast rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 text-sm flex items-center gap-2">
+            <svg class="h-5 w-5 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            <?php echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8'); ?>
+        </div>
     <?php endif; ?>
     <?php if ($error !== ''): ?>
-        <div class="rounded bg-rose-100 text-rose-800 px-4 py-2 text-sm"><?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?></div>
+        <div class="toast rounded-lg bg-red-50 border border-red-200 text-red-800 px-4 py-3 text-sm flex items-center gap-2">
+            <svg class="h-5 w-5 text-red-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?>
+        </div>
+    <?php endif; ?>
+</div>
+<?php endif; ?>
+
+<main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full">
+
+    <!-- Category filter pills -->
+    <?php if (!empty($categories)): ?>
+    <div class="flex flex-wrap items-center gap-2 mb-8">
+        <a href="shop.php<?php echo $searchQuery !== '' ? '?q=' . urlencode($searchQuery) : ''; ?>"
+           class="category-pill inline-flex items-center px-4 py-2 rounded-full text-sm font-medium border border-gray-300 hover:bg-gray-900 hover:text-white hover:border-gray-900 transition-all <?php echo !$selectedCategory ? 'active' : 'bg-white text-gray-700'; ?>">
+            All
+        </a>
+        <?php foreach ($categories as $cat): ?>
+            <a href="shop.php?category=<?php echo htmlspecialchars($cat['id'], ENT_QUOTES, 'UTF-8'); ?><?php echo $searchQuery !== '' ? '&q=' . urlencode($searchQuery) : ''; ?>"
+               class="category-pill inline-flex items-center px-4 py-2 rounded-full text-sm font-medium border border-gray-300 hover:bg-gray-900 hover:text-white hover:border-gray-900 transition-all <?php echo $selectedCategory === $cat['id'] ? 'active' : 'bg-white text-gray-700'; ?>">
+                <?php echo htmlspecialchars($cat['name'], ENT_QUOTES, 'UTF-8'); ?>
+            </a>
+        <?php endforeach; ?>
+    </div>
     <?php endif; ?>
 
-    <section class="bg-white border border-slate-200 rounded shadow-sm p-4 space-y-4">
-        <div class="flex items-center justify-between">
-            <h2 class="text-lg font-semibold text-slate-800">Products</h2>
-            <form method="get" class="flex items-center gap-2 text-sm">
-                <label class="text-slate-700">Category</label>
-                <select name="category" class="border rounded px-2 py-1 text-sm" onchange="this.form.submit()">
-                    <option value="">All</option>
-                    <?php foreach ($categories as $cat): ?>
-                        <option value="<?php echo htmlspecialchars($cat['id'], ENT_QUOTES, 'UTF-8'); ?>" <?php echo $selectedCategory === $cat['id'] ? 'selected' : ''; ?>>
-                            <?php echo htmlspecialchars($cat['name'], ENT_QUOTES, 'UTF-8'); ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </form>
-        </div>
-        <?php if (!empty($products)): ?>
-            <div class="grid gap-4 md:grid-cols-3">
-                <?php foreach ($products as $prod): ?>
-                    <div class="border border-slate-200 rounded p-3 flex flex-col gap-2">
+    <!-- Search results info -->
+    <?php if ($searchQuery !== ''): ?>
+    <div class="mb-6 flex items-center gap-2 text-sm text-gray-600">
+        <span>Showing results for "<strong><?php echo htmlspecialchars($searchQuery, ENT_QUOTES, 'UTF-8'); ?></strong>"</span>
+        <span class="text-gray-400">(<?php echo count($products); ?> found)</span>
+        <a href="shop.php<?php echo $selectedCategory ? '?category=' . urlencode($selectedCategory) : ''; ?>" class="text-gray-900 underline hover:no-underline ml-1">Clear</a>
+    </div>
+    <?php endif; ?>
+
+    <!-- Products grid -->
+    <?php if (!empty($products)): ?>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <?php foreach ($products as $prod): ?>
+                <div class="product-card bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm flex flex-col">
+                    <!-- Product image -->
+                    <a href="product-<?php echo htmlspecialchars($prod['slug'], ENT_QUOTES, 'UTF-8'); ?>" class="block overflow-hidden aspect-square bg-gray-100">
                         <?php if (!empty($prod['primary_image_url'])): ?>
-                            <a href="product.php?slug=<?php echo htmlspecialchars($prod['slug'], ENT_QUOTES, 'UTF-8'); ?>">
-                                <img src="<?php echo htmlspecialchars($prod['primary_image_url'], ENT_QUOTES, 'UTF-8'); ?>" alt="<?php echo htmlspecialchars($prod['name'], ENT_QUOTES, 'UTF-8'); ?>" class="w-full h-40 object-cover rounded border border-slate-200">
-                            </a>
-                        <?php endif; ?>
-                        <div>
-                            <div class="text-base font-semibold text-slate-900">
-                                <a href="product.php?slug=<?php echo htmlspecialchars($prod['slug'], ENT_QUOTES, 'UTF-8'); ?>" class="hover:underline">
-                                    <?php echo htmlspecialchars($prod['name'], ENT_QUOTES, 'UTF-8'); ?>
-                                </a>
+                            <img src="<?php echo htmlspecialchars($prod['primary_image_url'], ENT_QUOTES, 'UTF-8'); ?>"
+                                 alt="<?php echo htmlspecialchars($prod['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                 class="product-img w-full h-full object-contain p-2">
+                        <?php else: ?>
+                            <div class="w-full h-full flex items-center justify-center text-gray-300">
+                                <svg class="h-16 w-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                                </svg>
                             </div>
-                            <div class="text-sm text-slate-600"><?php echo htmlspecialchars($prod['description'] ?? '', ENT_QUOTES, 'UTF-8'); ?></div>
+                        <?php endif; ?>
+                    </a>
+
+                    <!-- Product info -->
+                    <div class="p-4 flex flex-col flex-1">
+                        <?php if ($prod['category_id'] && isset($categoryLookup[$prod['category_id']])): ?>
+                            <span class="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">
+                                <?php echo htmlspecialchars($categoryLookup[$prod['category_id']], ENT_QUOTES, 'UTF-8'); ?>
+                            </span>
+                        <?php endif; ?>
+
+                        <a href="product-<?php echo htmlspecialchars($prod['slug'], ENT_QUOTES, 'UTF-8'); ?>"
+                           class="text-base font-semibold text-gray-900 hover:text-gray-700 transition-colors line-clamp-2 mb-1">
+                            <?php echo htmlspecialchars($prod['name'], ENT_QUOTES, 'UTF-8'); ?>
+                        </a>
+
+                        <?php if (!empty($prod['description'])): ?>
+                            <p class="text-sm text-gray-500 line-clamp-2 mb-3"><?php echo htmlspecialchars($prod['description'], ENT_QUOTES, 'UTF-8'); ?></p>
+                        <?php else: ?>
+                            <div class="mb-3"></div>
+                        <?php endif; ?>
+
+                        <div class="mt-auto">
+                            <div class="flex items-center justify-between mb-3">
+                                <?php if ((int)($prod['show_price'] ?? 1)): ?>
+                                <span class="text-lg font-bold text-gray-900">
+                                    <?php echo htmlspecialchars(shop_money((int)$prod['price_cents'], $prod['currency']), ENT_QUOTES, 'UTF-8'); ?>
+                                </span>
+                                <?php else: ?>
+                                <span class="text-sm font-medium text-gray-500 italic">Contact for price</span>
+                                <?php endif; ?>
+                                <?php if ((int)$prod['stock'] > 0): ?>
+                                    <span class="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">In Stock</span>
+                                <?php else: ?>
+                                    <span class="text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded-full">Out of Stock</span>
+                                <?php endif; ?>
+                            </div>
+
+                            <?php if ((int)$prod['stock'] > 0): ?>
+                            <form method="post" class="flex items-center gap-2">
+                                <input type="hidden" name="form_action" value="add_to_cart">
+                                <input type="hidden" name="product_id" value="<?php echo htmlspecialchars($prod['id'], ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="number" name="quantity" value="1" min="1" max="<?php echo (int)$prod['stock']; ?>"
+                                       class="w-16 text-center border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent">
+                                <button type="submit" class="btn-cart flex-1 inline-flex justify-center items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium">
+                                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z"/>
+                                    </svg>
+                                    Add to Cart
+                                </button>
+                            </form>
+                            <?php else: ?>
+                                <button disabled class="w-full py-2 rounded-lg bg-gray-100 text-gray-400 text-sm font-medium cursor-not-allowed">
+                                    Out of Stock
+                                </button>
+                            <?php endif; ?>
                         </div>
-                        <div class="text-lg font-bold text-emerald-700"><?php echo htmlspecialchars(shop_money((int)$prod['price_cents'], $prod['currency']), ENT_QUOTES, 'UTF-8'); ?></div>
-                        <div class="text-xs text-slate-500">Stock: <?php echo (int)$prod['stock']; ?></div>
-                        <form method="post" class="flex items-center gap-2">
-                            <input type="hidden" name="form_action" value="add_to_cart">
-                            <input type="hidden" name="product_id" value="<?php echo htmlspecialchars($prod['id'], ENT_QUOTES, 'UTF-8'); ?>">
-                            <input type="number" name="quantity" value="1" min="1" class="border rounded px-2 py-1 text-sm w-16">
-                            <button type="submit" class="flex-1 inline-flex justify-center items-center px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm">Add</button>
-                            <a href="product.php?slug=<?php echo htmlspecialchars($prod['slug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-xs text-slate-600 hover:text-slate-800">View</a>
-                        </form>
                     </div>
-                <?php endforeach; ?>
-            </div>
-        <?php else: ?>
-            <p class="text-sm text-slate-600">No products available.</p>
-        <?php endif; ?>
-    </section>
-
-    <section class="bg-white border border-slate-200 rounded shadow-sm p-4 space-y-4">
-        <div class="flex items-center justify-between">
-            <h2 class="text-lg font-semibold text-slate-800">Cart</h2>
-            <form method="post">
-                <input type="hidden" name="form_action" value="clear_cart">
-                <button type="submit" class="text-sm text-rose-600 hover:text-rose-700">Clear cart</button>
-            </form>
+                </div>
+            <?php endforeach; ?>
         </div>
-        <?php if (!empty($cart)): ?>
-            <div class="overflow-x-auto">
-                <table class="min-w-full text-sm">
-                    <thead>
-                    <tr class="text-left text-slate-600 border-b">
-                        <th class="py-2 pr-4">Item</th>
-                        <th class="py-2 pr-4">Qty</th>
-                        <th class="py-2 pr-4">Price</th>
-                        <th class="py-2 pr-4">Line</th>
-                        <th class="py-2"></th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <?php foreach ($cart as $line): ?>
-                        <?php $lineTotal = ((int)$line['price_cents']) * ((int)$line['quantity']); ?>
-                        <tr class="border-b last:border-0">
-                            <td class="py-2 pr-4 font-medium text-slate-800"><?php echo htmlspecialchars($line['name'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td class="py-2 pr-4">
-                                <form method="post" class="flex items-center gap-2">
-                                    <input type="hidden" name="form_action" value="update_qty">
-                                    <input type="hidden" name="product_id" value="<?php echo htmlspecialchars($line['product_id'], ENT_QUOTES, 'UTF-8'); ?>">
-                                    <input type="number" name="quantity" value="<?php echo (int)$line['quantity']; ?>" min="1" class="border rounded px-2 py-1 text-sm w-20">
-                                    <button type="submit" class="text-xs text-blue-600 hover:text-blue-700">Update</button>
-                                </form>
-                            </td>
-                            <td class="py-2 pr-4 text-slate-700"><?php echo htmlspecialchars(shop_money((int)$line['price_cents'], $line['currency']), ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td class="py-2 pr-4 text-slate-900 font-semibold"><?php echo htmlspecialchars(shop_money($lineTotal, $line['currency']), ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td class="py-2">
-                                <form method="post">
-                                    <input type="hidden" name="form_action" value="remove_line">
-                                    <input type="hidden" name="product_id" value="<?php echo htmlspecialchars($line['product_id'], ENT_QUOTES, 'UTF-8'); ?>">
-                                    <button type="submit" class="text-xs text-rose-600 hover:text-rose-700">Remove</button>
-                                </form>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-            <div class="text-sm text-slate-700">Subtotal: <strong><?php echo htmlspecialchars(shop_money($cartSubtotal), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-        <?php else: ?>
-            <p class="text-sm text-slate-600">Cart is empty.</p>
-        <?php endif; ?>
-    </section>
-
-    <section class="bg-white border border-slate-200 rounded shadow-sm p-4 space-y-3">
-        <h2 class="text-lg font-semibold text-slate-800">Checkout</h2>
-        <form method="post" class="grid md:grid-cols-2 gap-3">
-            <input type="hidden" name="form_action" value="checkout">
-            <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">Name</label>
-                <input type="text" name="customer_name" class="w-full border rounded px-3 py-2 text-sm" placeholder="Your name">
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">Contact</label>
-                <input type="text" name="customer_contact" class="w-full border rounded px-3 py-2 text-sm" placeholder="Email or phone">
-            </div>
-            <div class="md:col-span-2">
-                <button type="submit" class="inline-flex items-center px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-sm">Place order</button>
-            </div>
-        </form>
-    </section>
+    <?php else: ?>
+        <div class="text-center py-20">
+            <svg class="mx-auto h-16 w-16 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+            </svg>
+            <h3 class="text-lg font-medium text-gray-900 mb-1">No products found</h3>
+            <p class="text-sm text-gray-500">Try adjusting your search or filter to find what you're looking for.</p>
+            <?php if ($searchQuery !== '' || $selectedCategory): ?>
+                <a href="shop.php" class="inline-flex items-center mt-4 text-sm font-medium text-gray-900 hover:text-gray-700 underline">View all products</a>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
 </main>
+
+<!-- Footer -->
+<footer class="bg-white border-t border-gray-200 mt-auto">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 text-center text-sm text-gray-500">
+        &copy; <?php echo date('Y'); ?> <?php echo htmlspecialchars($shopName, ENT_QUOTES, 'UTF-8'); ?>. All rights reserved.
+    </div>
+</footer>
+
+<script>
+// Auto-dismiss flash messages
+document.querySelectorAll('.toast').forEach(function(el) {
+    setTimeout(function() { el.remove(); }, 3000);
+});
+
+// Mobile menu toggle
+(function() {
+    var btn = document.getElementById('mobile-menu-btn');
+    var menu = document.getElementById('mobile-menu');
+    if (btn && menu) {
+        btn.addEventListener('click', function() {
+            menu.classList.toggle('hidden');
+        });
+    }
+})();
+</script>
 </body>
 </html>
