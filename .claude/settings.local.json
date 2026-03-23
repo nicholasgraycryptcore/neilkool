@@ -24,7 +24,8 @@
       "Bash(rm fix_hero.php)",
       "Bash(xargs grep:*)",
       "Bash(git checkout:*)",
-      "Bash(/c/xampp/php/php.exe -r \":*)"
+      "Bash(/c/xampp/php/php.exe -r \":*)",
+      "Bash(grep -r \"$_OST\\\\|$_ET\\\\|$_EQUEST\" /c/xampp/htdocs/neilkool --include=\"*.php\")"
     ]
   }
 }

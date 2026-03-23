@@ -166,6 +166,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = trim($_POST['slug'] ?? '');
     $content = $_POST['content'] ?? '';
     $page_css = $_POST['page_css'] ?? '';
+
+    // Decode base64-encoded fields (used to bypass Cloudflare WAF blocking HTML in POST)
+    // JS encodes with: btoa(unescape(encodeURIComponent(value))) to handle UTF-8
+    if (!empty($_POST['_b64'])) {
+        $decoded = base64_decode($content, true);
+        if ($decoded !== false) { $content = $decoded; }
+        $decoded = base64_decode($page_css, true);
+        if ($decoded !== false) { $page_css = $decoded; }
+    }
     $full_width = !empty($_POST['full_width']) ? 1 : 0;
     $show_title_flag = !empty($_POST['show_title']) ? 1 : 0;
     $show_meta_flag = !empty($_POST['show_meta']) ? 1 : 0;
@@ -379,6 +388,7 @@ if ($action === 'edit' && $id) {
         </div>
         <form method="post" action="admin.php" enctype="multipart/form-data" class="space-y-4">
             <input type="hidden" name="id" value="<?php echo htmlspecialchars($edit_id, ENT_QUOTES, 'UTF-8'); ?>">
+            <input type="hidden" name="_b64" value="1">
 
             <div>
                 <label for="title" class="block text-sm font-medium text-slate-700">Page title</label>
@@ -717,6 +727,22 @@ if ($action === 'edit' && $id) {
                     '</body></html>');
                 doc.close();
             }
+
+            // Base64-encode content and CSS before submission to bypass Cloudflare WAF
+            document.querySelector('form[action="admin.php"]').addEventListener('submit', function() {
+                var contentField = document.getElementById('content');
+                var cssField = document.getElementById('page_css');
+
+                // Sync TinyMCE content back to textarea first
+                if (window.tinymce && tinymce.get('content')) {
+                    tinymce.get('content').save();
+                }
+
+                contentField.value = btoa(unescape(encodeURIComponent(contentField.value)));
+                if (cssField) {
+                    cssField.value = btoa(unescape(encodeURIComponent(cssField.value)));
+                }
+            });
 
             document.getElementById('content').addEventListener('input', updatePreview);
             document.getElementById('title').addEventListener('input', updatePreview);
