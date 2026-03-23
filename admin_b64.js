@@ -1,45 +1,144 @@
 /**
- * Base64-encode all textarea and text input values before form submission.
- * This prevents Cloudflare WAF from blocking POST requests containing
- * HTML, CSS, or code-like content.
+ * Intercept admin form submissions and send via AJAX JSON POST
+ * to admin_save.php. This completely bypasses Cloudflare WAF because:
+ * 1. Content-Type is application/json (WAF inspects form-urlencoded, not JSON)
+ * 2. All form data is wrapped in a single base64 blob
  *
- * Usage: include this script on any admin page, then add class="b64-form"
- * to forms that should be encoded. A hidden _b64=1 field is auto-added
- * so the server knows to decode.
+ * Add class="b64-form" to any form that should use this.
  */
 (function () {
-    function utf8ToBase64(str) {
-        return btoa(unescape(encodeURIComponent(str)));
+    /**
+     * Serialize a form into a plain object (supports arrays like name[0][text]).
+     */
+    function serializeForm(form) {
+        var data = {};
+        var elements = form.elements;
+        for (var i = 0; i < elements.length; i++) {
+            var el = elements[i];
+            if (!el.name || el.disabled) continue;
+            if (el.type === 'file') continue; // files handled separately
+            if ((el.type === 'checkbox' || el.type === 'radio') && !el.checked) continue;
+            if (el.type === 'submit' || el.type === 'button') continue;
+
+            // Handle array-style names: name[0][text] etc.
+            setNestedValue(data, el.name, el.value);
+        }
+        return data;
+    }
+
+    function setNestedValue(obj, name, value) {
+        // Parse name like "elem[0][text]" into keys ["elem", "0", "text"]
+        var keys = [];
+        var match = name.match(/^([^\[]+)/);
+        if (!match) return;
+        keys.push(match[1]);
+        var rest = name.slice(match[0].length);
+        var bracketMatch;
+        var bracketRe = /\[([^\]]*)\]/g;
+        while ((bracketMatch = bracketRe.exec(rest)) !== null) {
+            keys.push(bracketMatch[1]);
+        }
+
+        var current = obj;
+        for (var i = 0; i < keys.length - 1; i++) {
+            var key = keys[i];
+            var nextKey = keys[i + 1];
+            if (current[key] === undefined) {
+                // If next key is numeric or empty, use array
+                current[key] = (nextKey === '' || /^\d+$/.test(nextKey)) ? [] : {};
+            }
+            current = current[key];
+        }
+        var lastKey = keys[keys.length - 1];
+        if (lastKey === '') {
+            // name[] style - push to array
+            if (!Array.isArray(current)) return;
+            current.push(value);
+        } else {
+            current[lastKey] = value;
+        }
     }
 
     document.addEventListener('submit', function (e) {
         var form = e.target;
         if (!form || !form.classList.contains('b64-form')) return;
 
+        // Stop the normal form submission
+        e.preventDefault();
+
         // Sync TinyMCE if present
         if (window.tinymce) {
             tinymce.triggerSave();
         }
 
-        // Add hidden marker so PHP knows to decode
-        if (!form.querySelector('input[name="_b64"]')) {
-            var marker = document.createElement('input');
-            marker.type = 'hidden';
-            marker.name = '_b64';
-            marker.value = '1';
-            form.appendChild(marker);
+        // Check for file inputs with actual files
+        var fileInputs = form.querySelectorAll('input[type="file"]');
+        var hasFiles = false;
+        for (var f = 0; f < fileInputs.length; f++) {
+            if (fileInputs[f].files && fileInputs[f].files.length > 0) {
+                hasFiles = true;
+                break;
+            }
         }
 
-        // Encode all textareas
-        var textareas = form.querySelectorAll('textarea');
-        for (var i = 0; i < textareas.length; i++) {
-            textareas[i].value = utf8ToBase64(textareas[i].value);
+        // If form has files, fall back to direct submission (file uploads
+        // are multipart and generally don't trigger WAF on the file content)
+        if (hasFiles) {
+            form.classList.remove('b64-form');
+            form.submit();
+            return;
         }
 
-        // Encode text inputs (skip hidden, checkbox, radio, file, submit, button)
-        var inputs = form.querySelectorAll('input[type="text"]');
-        for (var j = 0; j < inputs.length; j++) {
-            inputs[j].value = utf8ToBase64(inputs[j].value);
+        // Serialize form data
+        var formData = serializeForm(form);
+
+        // Get the target URL from form action
+        var target = form.getAttribute('action') || window.location.pathname;
+
+        // Build the AJAX payload: JSON envelope with base64 payload
+        var payload = btoa(unescape(encodeURIComponent(JSON.stringify(formData))));
+        var envelope = JSON.stringify({
+            target: target,
+            payload: payload
+        });
+
+        // Show a subtle saving indicator
+        var submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
+        var origText = '';
+        if (submitBtn) {
+            origText = submitBtn.textContent || submitBtn.value;
+            if (submitBtn.textContent !== undefined) submitBtn.textContent = 'Saving...';
+            else submitBtn.value = 'Saving...';
+            submitBtn.disabled = true;
         }
-    }, true); // use capture so it fires before the form posts
+
+        // Send via AJAX
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', 'admin_save.php', true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+
+            if (xhr.status === 200) {
+                try {
+                    var resp = JSON.parse(xhr.responseText);
+                    if (resp.ok && resp.redirect) {
+                        window.location.href = resp.redirect;
+                        return;
+                    }
+                } catch (ex) {}
+                // Fallback: reload
+                window.location.reload();
+            } else {
+                // On error, restore button and show alert
+                if (submitBtn) {
+                    if (submitBtn.textContent !== undefined) submitBtn.textContent = origText;
+                    else submitBtn.value = origText;
+                    submitBtn.disabled = false;
+                }
+                alert('Save failed (HTTP ' + xhr.status + '). Please try again.');
+            }
+        };
+        xhr.send(envelope);
+    }, true);
 })();
