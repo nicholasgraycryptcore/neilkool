@@ -22,7 +22,9 @@
       "Bash(c=/xampp/php/php.exe -r \":*)",
       "Bash(c:/xampp/php/php.exe fix_hero.php)",
       "Bash(rm fix_hero.php)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(git checkout:*)",
+      "Bash(/c/xampp/php/php.exe -r \":*)"
     ]
   }
 }
