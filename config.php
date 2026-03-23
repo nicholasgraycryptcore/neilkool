@@ -8,6 +8,8 @@ define('DB_FILE', DATA_DIR . '/site.sqlite');
 define('PAGES_JSON_FILE', DATA_DIR . '/pages.json');
 // Directory for uploaded media files
 define('MEDIA_DIR', DATA_DIR . '/media');
+// Directory for per-page CSS/JS asset files
+define('PAGE_ASSETS_DIR', DATA_DIR . '/page-assets');
 
 // Simple admin credentials (change these)
 define('ADMIN_USERNAME', 'newageadmin');
@@ -23,6 +25,9 @@ if (!is_dir(DATA_DIR)) {
 }
 if (!is_dir(MEDIA_DIR)) {
     mkdir(MEDIA_DIR, 0777, true);
+}
+if (!is_dir(PAGE_ASSETS_DIR)) {
+    mkdir(PAGE_ASSETS_DIR, 0777, true);
 }
 
 // Get PDO connection to SQLite database
@@ -80,6 +85,11 @@ function init_db(PDO $db): void
     }
     try {
         $db->exec('ALTER TABLE pages ADD COLUMN show_meta INTEGER NOT NULL DEFAULT 1');
+    } catch (PDOException $e) {
+        // Ignore if the column already exists
+    }
+    try {
+        $db->exec('ALTER TABLE pages ADD COLUMN page_js TEXT');
     } catch (PDOException $e) {
         // Ignore if the column already exists
     }
@@ -425,6 +435,50 @@ function find_page_by_slug(array $pages, string $slug): ?array
         }
     }
     return null;
+}
+
+/**
+ * Write a page's CSS or JS to a static file in data/page-assets/.
+ * If content is empty, delete the file.
+ */
+function write_page_asset(string $page_id, string $type, string $content): void
+{
+    $ext = ($type === 'js') ? 'js' : 'css';
+    $file = PAGE_ASSETS_DIR . '/' . $page_id . '.' . $ext;
+    $content = trim($content);
+    if ($content === '') {
+        if (file_exists($file)) { unlink($file); }
+    } else {
+        file_put_contents($file, $content);
+    }
+}
+
+/**
+ * Read a page's CSS or JS from its static file.
+ */
+function read_page_asset(string $page_id, string $type): string
+{
+    $ext = ($type === 'js') ? 'js' : 'css';
+    $file = PAGE_ASSETS_DIR . '/' . $page_id . '.' . $ext;
+    return file_exists($file) ? file_get_contents($file) : '';
+}
+
+/**
+ * Check if a page asset file exists.
+ */
+function page_asset_exists(string $page_id, string $type): bool
+{
+    $ext = ($type === 'js') ? 'js' : 'css';
+    return file_exists(PAGE_ASSETS_DIR . '/' . $page_id . '.' . $ext);
+}
+
+/**
+ * Get the public URL for a page asset.
+ */
+function page_asset_url(string $page_id, string $type): string
+{
+    $ext = ($type === 'js') ? 'js' : 'css';
+    return 'data/page-assets/' . rawurlencode($page_id) . '.' . $ext;
 }
 
 // Generate a simple slug from title

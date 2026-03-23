@@ -373,6 +373,9 @@ if ($slug !== null) {
         <?php echo $page['page_css']; ?>
         <?php endif; ?>
     </style>
+    <?php if (page_asset_exists($page['id'], 'css')): ?>
+        <link rel="stylesheet" href="<?php echo htmlspecialchars(page_asset_url($page['id'], 'css'), ENT_QUOTES, 'UTF-8'); ?>">
+    <?php endif; ?>
     <?php if (!empty($auto_snippets)): ?>
         <?php foreach ($auto_snippets as $snippet): ?>
             <?php echo $snippet['code']; ?>
@@ -442,5 +445,8 @@ if ($slug !== null) {
     }
 })();
 </script>
+<?php if (page_asset_exists($page['id'], 'js')): ?>
+    <script src="<?php echo htmlspecialchars(page_asset_url($page['id'], 'js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+<?php endif; ?>
 </body>
 </html>
