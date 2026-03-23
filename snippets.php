@@ -2,6 +2,7 @@
 require __DIR__ . '/auth.php';
 require_login();
 require_role(['admin', 'editor']);
+require __DIR__ . '/admin_b64_decode.php';
 
 $snippets = load_snippets();
 
@@ -10,6 +11,7 @@ $id = $_GET['id'] ?? null;
 
 // Handle create/update form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    decode_b64_post();
     $name = trim($_POST['name'] ?? '');
     $language = trim($_POST['language'] ?? 'javascript');
     $code = $_POST['code'] ?? '';
@@ -54,6 +56,7 @@ if ($action === 'edit' && $id) {
     <meta charset="UTF-8">
     <title>Code Snippets - Website Builder Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="admin_b64.js"></script>
 </head>
 <body class="bg-slate-100 min-h-screen">
 <header class="bg-slate-800 text-white">
@@ -156,7 +159,7 @@ if ($action === 'edit' && $id) {
                 Define reusable pieces of code such as analytics tags, chat widgets, or helper scripts. You can insert these into any page from the page editor.
             </p>
         </div>
-        <form method="post" action="snippets.php" class="space-y-4">
+        <form method="post" action="snippets.php" class="b64-form space-y-4">
             <input type="hidden" name="id" value="<?php echo htmlspecialchars($edit_id, ENT_QUOTES, 'UTF-8'); ?>">
 
             <div>

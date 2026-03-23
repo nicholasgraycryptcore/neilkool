@@ -3,6 +3,7 @@ require __DIR__ . '/auth.php';
 require_login();
 require_role(['admin']);
 require __DIR__ . '/admin_nav.php';
+require __DIR__ . '/admin_b64_decode.php';
 
 // Handle flash messaging via query params for simplicity
 $message = $_GET['msg'] ?? '';
@@ -16,6 +17,7 @@ function format_money(int $cents, string $currency = 'USD'): string
 
 // Process form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    decode_b64_post();
     $action = $_POST['form_action'] ?? '';
 
     if ($action === 'save_category') {
@@ -172,6 +174,7 @@ $shop_menu_items = load_shop_menu_items();
     <meta charset="UTF-8">
     <title>Ecommerce Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="admin_b64.js"></script>
 </head>
 <body class="bg-slate-100 min-h-screen">
 <?php render_admin_sidebar('ecommerce'); ?>
@@ -188,7 +191,7 @@ $shop_menu_items = load_shop_menu_items();
         <div class="flex items-center justify-between mb-3">
             <h2 class="text-lg font-semibold text-slate-800">Categories</h2>
         </div>
-        <form method="post" class="grid md:grid-cols-4 gap-3">
+        <form method="post" class="b64-form grid md:grid-cols-4 gap-3">
             <input type="hidden" name="form_action" value="save_category">
             <div class="md:col-span-2">
                 <label class="block text-sm font-medium text-slate-700 mb-1">Name</label>
@@ -246,7 +249,7 @@ $shop_menu_items = load_shop_menu_items();
                 <a href="ecommerce.php" class="text-sm text-blue-600">Clear</a>
             <?php endif; ?>
         </form>
-        <form method="post" id="product-form" class="grid md:grid-cols-3 gap-3">
+        <form method="post" id="product-form" class="b64-form grid md:grid-cols-3 gap-3">
             <input type="hidden" name="form_action" value="save_product">
             <input type="hidden" name="id" id="product_id" value="">
             <div>
@@ -431,7 +434,7 @@ $shop_menu_items = load_shop_menu_items();
         <div class="flex items-center justify-between mb-3">
             <h2 class="text-lg font-semibold text-slate-800">Inventory adjustment</h2>
         </div>
-        <form method="post" class="grid md:grid-cols-4 gap-3">
+        <form method="post" class="b64-form grid md:grid-cols-4 gap-3">
             <input type="hidden" name="form_action" value="adjust_stock">
             <div class="md:col-span-2">
                 <label class="block text-sm font-medium text-slate-700 mb-1">Product</label>
@@ -462,7 +465,7 @@ $shop_menu_items = load_shop_menu_items();
             <h2 class="text-lg font-semibold text-slate-800">Shop Navigation Menu</h2>
         </div>
         <p class="text-sm text-slate-500 mb-3">Add links that appear in the shop page header navigation.</p>
-        <form method="post" id="menu-item-form" class="grid md:grid-cols-5 gap-3">
+        <form method="post" id="menu-item-form" class="b64-form grid md:grid-cols-5 gap-3">
             <input type="hidden" name="form_action" value="save_menu_item">
             <input type="hidden" name="menu_id" id="menu_item_id" value="">
             <div class="md:col-span-2">
@@ -509,7 +512,7 @@ $shop_menu_items = load_shop_menu_items();
                             <td class="py-2 pr-4 text-slate-600"><?php echo (int)$mi['open_new_tab'] ? 'Yes' : 'No'; ?></td>
                             <td class="py-2 whitespace-nowrap">
                                 <button type="button" onclick='editMenuItem(<?php echo htmlspecialchars(json_encode($mi), ENT_QUOTES, "UTF-8"); ?>)' class="text-xs text-amber-600 hover:underline mr-2">Edit</button>
-                                <form method="post" class="inline" onsubmit="return confirm('Remove this menu item?');">
+                                <form method="post" class="b64-form inline" onsubmit="return confirm('Remove this menu item?');">
                                     <input type="hidden" name="form_action" value="delete_menu_item">
                                     <input type="hidden" name="menu_id" value="<?php echo htmlspecialchars($mi['id'], ENT_QUOTES, 'UTF-8'); ?>">
                                     <button type="submit" class="text-xs text-rose-600 hover:underline">Remove</button>

@@ -25,7 +25,16 @@
       "Bash(xargs grep:*)",
       "Bash(git checkout:*)",
       "Bash(/c/xampp/php/php.exe -r \":*)",
-      "Bash(grep -r \"$_OST\\\\|$_ET\\\\|$_EQUEST\" /c/xampp/htdocs/neilkool --include=\"*.php\")"
+      "Bash(grep -r \"$_OST\\\\|$_ET\\\\|$_EQUEST\" /c/xampp/htdocs/neilkool --include=\"*.php\")",
+      "Bash(php import_gallery.php)",
+      "Bash(\"/c/xampp/php/php.exe\" \"c:/xampp/htdocs/neilkool/import_gallery.php\")",
+      "Bash(ls c:/xampp/htdocs/neilkool/data/media/page_*.jpg)",
+      "Bash(\"/c/xampp/php/php.exe\" -r \"require ''''c:/xampp/htdocs/neilkool/config.php''''; $p = load_pages\\(\\); foreach\\($p as $pg\\){ if\\($pg[''''slug'''']===''''our-work''''\\){ echo ''''Page found: ''''.$pg[''''title''''].''''\\\\n''''; echo ''''Template: ''''.$pg[''''template''''].''''\\\\n''''; echo ''''Full width: ''''.$pg[''''full_width''''].''''\\\\n''''; echo ''''Content length: ''''.strlen\\($pg[''''content'''']\\).'''' chars\\\\n''''; break; }}\")",
+      "Bash(\"/c/xampp/php/php.exe\" -r \"require ''c:/xampp/htdocs/neilkool/config.php''; $p = load_pages\\(\\); foreach\\($p as $pg\\){ echo $pg[''slug''] . '' => '' . $pg[''title''] . ''\\\\n''; }\")",
+      "Bash(\"/c/xampp/php/php.exe\" -r \"require ''c:/xampp/htdocs/neilkool/config.php''; $p = load_pages\\(\\); foreach\\($p as $pg\\){ echo $pg[''slug''] . '' => '' . $pg[''title''] . PHP_EOL; }\")",
+      "Bash(\"/c/xampp/php/php.exe\" \"c:/xampp/htdocs/neilkool/_list_pages.php\")",
+      "Bash(\"/c/xampp/php/php.exe\" \"c:/xampp/htdocs/neilkool/_set_menus.php\")",
+      "Bash(\"/c/xampp/php/php.exe\" \"c:/xampp/htdocs/neilkool/_get_home.php\")"
     ]
   }
 }

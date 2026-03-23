@@ -2,6 +2,7 @@
 require __DIR__ . '/auth.php';
 require_login();
 require_role(['admin', 'editor']);
+require __DIR__ . '/admin_b64_decode.php';
 
 $parts = load_parts();
 
@@ -10,6 +11,7 @@ $id = $_GET['id'] ?? null;
 
 // Handle create/update form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    decode_b64_post();
     $name = trim($_POST['name'] ?? '');
     $content = $_POST['content'] ?? '';
     $part_id = $_POST['id'] ?? '';
@@ -49,6 +51,7 @@ if ($action === 'edit' && $id) {
     <meta charset="UTF-8">
     <title>Reusable Parts - Website Builder Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="admin_b64.js"></script>
 </head>
 <body class="bg-slate-100 min-h-screen">
 <header class="bg-slate-800 text-white">
@@ -133,7 +136,7 @@ if ($action === 'edit' && $id) {
                 Define reusable sections like headers, footers, or call-to-action blocks. You can insert these into any page from the page editor.
             </p>
         </div>
-        <form method="post" action="parts.php" class="space-y-4">
+        <form method="post" action="parts.php" class="b64-form space-y-4">
             <input type="hidden" name="id" value="<?php echo htmlspecialchars($edit_id, ENT_QUOTES, 'UTF-8'); ?>">
 
             <div>

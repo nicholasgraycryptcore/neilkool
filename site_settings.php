@@ -2,6 +2,7 @@
 require __DIR__ . '/auth.php';
 require_login();
 require_role(['admin']);
+require __DIR__ . '/admin_b64_decode.php';
 
 // Site-wide appearance and navigation settings
 $site_title = get_setting('site_title', 'Your Site');
@@ -59,6 +60,7 @@ if ($raw_menu_minimal !== '') {
 $show_admin_link = get_setting('show_admin_link', '1') !== '0';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    decode_b64_post();
     $new_title = trim($_POST['site_title'] ?? '');
     $new_logo_url = trim($_POST['site_logo_url'] ?? '');
     $new_show_admin_link = !empty($_POST['show_admin_link']) ? '1' : '0';
@@ -129,6 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <title>Site appearance & navigation</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="admin_b64.js"></script>
 </head>
 <body class="bg-slate-100 min-h-screen">
 <header class="bg-slate-800 text-white">
@@ -151,7 +154,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <section class="rounded border border-slate-200 bg-white p-4">
         <h2 class="text-lg font-semibold text-slate-800 mb-2">Site appearance &amp; navigation</h2>
         <p class="mb-3 text-xs text-slate-500">Configure your site name, optional logo, main menu items, and whether the public header shows an Admin link.</p>
-        <form method="post" action="site_settings.php" class="space-y-3">
+        <form method="post" action="site_settings.php" class="b64-form space-y-3">
             <div class="grid gap-3 md:grid-cols-2">
                 <div>
                     <label for="site_title" class="block text-sm font-medium text-slate-700">Site title</label>

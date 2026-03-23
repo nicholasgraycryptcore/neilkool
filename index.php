@@ -369,6 +369,9 @@ if ($slug !== null) {
         <?php if ($site_custom_css !== ''): ?>
         <?php echo $site_custom_css; ?>
         <?php endif; ?>
+        <?php if (!empty($page['page_css'])): ?>
+        <?php echo $page['page_css']; ?>
+        <?php endif; ?>
     </style>
     <?php if (!empty($auto_snippets)): ?>
         <?php foreach ($auto_snippets as $snippet): ?>

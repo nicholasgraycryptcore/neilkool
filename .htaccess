@@ -3,3 +3,9 @@ RewriteBase /neilkool/
 
 # Product clean URLs: /product-{slug} -> product.php?slug={slug}
 RewriteRule ^product-([a-zA-Z0-9_-]+)$ product.php?slug=$1 [L,QSA]
+
+# CMS page clean URLs: /about -> index.php?page=about
+# Skip existing files and directories
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^([a-zA-Z0-9_-]+)$ index.php?page=$1 [L,QSA]

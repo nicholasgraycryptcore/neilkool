@@ -2,6 +2,7 @@
 require __DIR__ . '/auth.php';
 require_login();
 require_role(['admin', 'editor']);
+require __DIR__ . '/admin_b64_decode.php';
 require __DIR__ . '/admin_nav.php';
 
 $pages = load_pages();
@@ -75,6 +76,7 @@ $id = $_GET['id'] ?? null;
 
 // Handle create/update form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    decode_b64_post();
     // Handle settings updates (like landing page, site appearance) separately
     if (isset($_POST['settings_action'])) {
         if ($_POST['settings_action'] === 'set_home_page') {
@@ -166,15 +168,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = trim($_POST['slug'] ?? '');
     $content = $_POST['content'] ?? '';
     $page_css = $_POST['page_css'] ?? '';
-
-    // Decode base64-encoded fields (used to bypass Cloudflare WAF blocking HTML in POST)
-    // JS encodes with: btoa(unescape(encodeURIComponent(value))) to handle UTF-8
-    if (!empty($_POST['_b64'])) {
-        $decoded = base64_decode($content, true);
-        if ($decoded !== false) { $content = $decoded; }
-        $decoded = base64_decode($page_css, true);
-        if ($decoded !== false) { $page_css = $decoded; }
-    }
     $full_width = !empty($_POST['full_width']) ? 1 : 0;
     $show_title_flag = !empty($_POST['show_title']) ? 1 : 0;
     $show_meta_flag = !empty($_POST['show_meta']) ? 1 : 0;
@@ -283,6 +276,7 @@ if ($action === 'edit' && $id) {
            height:500px !important;
         }
     </style>
+    <script src="admin_b64.js"></script>
 </head>
 <body class="bg-slate-100 min-h-screen">
 <?php render_admin_sidebar('dashboard'); ?>
@@ -308,7 +302,7 @@ if ($action === 'edit' && $id) {
             <div>
                 <h2 class="text-xl font-semibold text-slate-800">Pages</h2>
                 <?php if (!empty($pages)): ?>
-                    <form method="post" action="admin.php" class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-700">
+                    <form method="post" action="admin.php" class="b64-form mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-700">
                         <input type="hidden" name="settings_action" value="set_home_page">
                         <label for="home_page_id" class="mr-1">Landing page:</label>
                         <select id="home_page_id" name="home_page_id" class="rounded border-slate-300 bg-white px-2 py-1 text-xs shadow-sm focus:border-blue-500 focus:ring-blue-500">
@@ -386,9 +380,8 @@ if ($action === 'edit' && $id) {
             <h2 class="text-xl font-semibold text-slate-800"><?php echo $edit_id ? 'Edit page' : 'Create new page'; ?></h2>
             <p class="text-sm text-slate-500">Fill in the basic details, then use the visual editor to design the page content.</p>
         </div>
-        <form method="post" action="admin.php" enctype="multipart/form-data" class="space-y-4">
+        <form method="post" action="admin.php" enctype="multipart/form-data" class="b64-form space-y-4">
             <input type="hidden" name="id" value="<?php echo htmlspecialchars($edit_id, ENT_QUOTES, 'UTF-8'); ?>">
-            <input type="hidden" name="_b64" value="1">
 
             <div>
                 <label for="title" class="block text-sm font-medium text-slate-700">Page title</label>
@@ -727,22 +720,6 @@ if ($action === 'edit' && $id) {
                     '</body></html>');
                 doc.close();
             }
-
-            // Base64-encode content and CSS before submission to bypass Cloudflare WAF
-            document.querySelector('form[action="admin.php"]').addEventListener('submit', function() {
-                var contentField = document.getElementById('content');
-                var cssField = document.getElementById('page_css');
-
-                // Sync TinyMCE content back to textarea first
-                if (window.tinymce && tinymce.get('content')) {
-                    tinymce.get('content').save();
-                }
-
-                contentField.value = btoa(unescape(encodeURIComponent(contentField.value)));
-                if (cssField) {
-                    cssField.value = btoa(unescape(encodeURIComponent(cssField.value)));
-                }
-            });
 
             document.getElementById('content').addEventListener('input', updatePreview);
             document.getElementById('title').addEventListener('input', updatePreview);

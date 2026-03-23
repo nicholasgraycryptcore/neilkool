@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . '/auth.php';
 require_login();
+require __DIR__ . '/admin_b64_decode.php';
 
 $pages = load_pages();
 $id = $_GET['id'] ?? null;
@@ -31,6 +32,7 @@ function get_editable_nodes(DOMDocument $dom): array
 
 // Handle save edits
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    decode_b64_post();
     $html = $page['content'] ?? '';
     $dom = new DOMDocument();
     libxml_use_internal_errors(true);
@@ -90,6 +92,7 @@ $nodes = get_editable_nodes($dom);
     <meta charset="UTF-8">
     <title>Content Section Editor - <?php echo htmlspecialchars($page['title'], ENT_QUOTES, 'UTF-8'); ?></title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="admin_b64.js"></script>
 </head>
 <body class="bg-slate-100 min-h-screen">
 <header class="bg-slate-800 text-white">
@@ -114,7 +117,7 @@ $nodes = get_editable_nodes($dom);
         <p class="text-sm text-slate-600 bg-white border rounded px-4 py-3">No editable text elements (&lt;h1&gt;-&lt;h6&gt;, &lt;p&gt;, &lt;a&gt;, &lt;span&gt;, &lt;b&gt;, &lt;strong&gt;, &lt;em&gt;, &lt;i&gt;) were found in this page.</p>
     <?php else: ?>
         <p class="mb-3 text-sm text-slate-600">Use this screen to update text and links without touching any HTML. Each row represents a heading or text element (paragraphs, links, spans, bold/italic text) on your page.</p>
-        <form method="post" action="element_editor.php?id=<?php echo urlencode($page['id']); ?>" class="space-y-3">
+        <form method="post" action="element_editor.php?id=<?php echo urlencode($page['id']); ?>" class="b64-form space-y-3">
             <div class="overflow-hidden rounded border border-slate-200 bg-white">
                 <table class="min-w-full text-sm">
                     <thead>

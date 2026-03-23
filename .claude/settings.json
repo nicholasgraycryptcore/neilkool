@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"/c/xampp/php/php.exe\" \"c:/xampp/htdocs/neilkool/_get_home2.php\")",
+      "Bash(\"/c/xampp/php/php.exe\" \"c:/xampp/htdocs/neilkool/_get_home3.php\")",
+      "Bash(\"/c/xampp/php/php.exe\" \"c:/xampp/htdocs/neilkool/_update_gallery.php\")"
+    ]
+  }
+}
